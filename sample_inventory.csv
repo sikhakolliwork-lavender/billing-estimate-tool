@@ -1,0 +1,11 @@
+sku,name,company,size_mm,size_inch,base_price,tax_rate,discount_rate
+BOLT001,Hex Bolt M6x20,Fasteners Inc,6,0.24,5.50,18,5
+BOLT002,Hex Bolt M8x25,Fasteners Inc,8,0.31,8.75,18,5
+WASHER001,Flat Washer M6,Washers Co,6,0.24,0.50,18,0
+WASHER002,Flat Washer M8,Washers Co,8,0.31,0.75,18,0
+NUT001,Hex Nut M6,Nuts Ltd,6,0.24,2.25,18,0
+NUT002,Hex Nut M8,Nuts Ltd,8,0.31,3.50,18,0
+SCREW001,Phillips Head Screw,Screws Corp,4,0.16,1.20,5,10
+PIPE001,Steel Pipe 1 inch,Pipes R Us,25.4,1,15.00,12,15
+PIPE002,Steel Pipe 2 inch,Pipes R Us,50.8,2,28.50,12,15
+VALVE001,Ball Valve 1/2 inch,Valves Plus,12.7,0.5,45.00,18,8

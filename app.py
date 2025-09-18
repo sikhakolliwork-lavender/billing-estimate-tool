@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 from rapidfuzz import fuzz, process
 import os
+import io
 
 # Configuration
 DATA_DIR = Path("data")
@@ -35,14 +36,14 @@ class DataManager:
             "default_discount_rate": 0.0,
             "invoice_number_prefix": "INV",
             "invoice_counter": 1,
-            "currency": "USD",
-            "currency_symbol": "$",
+            "currency": "INR",
+            "currency_symbol": "₹",
             "rounding_mode": "ROUND_HALF_UP",
             "business_info": {
-                "name": "Your Business Name",
-                "address": "123 Business St\nCity, State 12345",
-                "phone": "(555) 123-4567",
-                "email": "contact@business.com"
+                "name": "LOSRA ENTERPRISES",
+                "address": "#74-2-20, Yanamalakuduru Lakula Rd, Vijayawada, Andhra Pradesh 520007",
+                "phone": "8977127227, 9848417615",
+                "email": "losraenterprises437@gmail.com"
             }
         }
 
@@ -93,8 +94,12 @@ class DataManager:
                 df = pd.DataFrame(columns=[
                     'item_id', 'sku', 'name', 'company', 'size_mm', 'size_inch',
                     'base_price', 'tax_rate', 'discount_rate', 'search_blob',
-                    'created_at', 'updated_at'
+                    'display_text', 'created_at', 'updated_at'
                 ])
+
+            # Ensure display_text column exists (for backward compatibility)
+            if 'display_text' not in df.columns:
+                df['display_text'] = df.apply(self._create_display_text, axis=1)
 
             return df
         except Exception as e:
@@ -102,7 +107,7 @@ class DataManager:
             return pd.DataFrame(columns=[
                 'item_id', 'sku', 'name', 'company', 'size_mm', 'size_inch',
                 'base_price', 'tax_rate', 'discount_rate', 'search_blob',
-                'created_at', 'updated_at'
+                'display_text', 'created_at', 'updated_at'
             ])
 
     def save_inventory(self, df):
@@ -111,8 +116,9 @@ class DataManager:
         self._backup_file(file_path)
 
         try:
-            # Update search blob for all items
+            # Update search blob and display text for all items
             df['search_blob'] = df.apply(self._create_search_blob, axis=1)
+            df['display_text'] = df.apply(self._create_display_text, axis=1)
             df['updated_at'] = datetime.now().isoformat()
 
             if self.settings["storage_mode"] == "parquet":
@@ -178,6 +184,64 @@ class DataManager:
         ]
         return ' '.join(fields).lower()
 
+    def _create_display_text(self, row):
+        """Create formatted display text for dropdown suggestions"""
+        parts = []
+
+        # SKU and Name (primary info)
+        if row.get('sku'):
+            parts.append(f"{row['sku']}")
+        if row.get('name'):
+            parts.append(f"{row['name']}")
+
+        # Company
+        if row.get('company'):
+            parts.append(f"{row['company']}")
+
+        # Price with currency (remove .00 if whole number)
+        if row.get('base_price') is not None:
+            price = float(row['base_price'])
+            if price == int(price):
+                parts.append(f"₹{int(price)}")
+            else:
+                parts.append(f"₹{price:.2f}")
+
+        # Sizes (remove .0 if whole number)
+        size_parts = []
+        if row.get('size_mm') is not None and row['size_mm'] != '':
+            size_mm = float(row['size_mm'])
+            if size_mm == int(size_mm):
+                size_parts.append(f"{int(size_mm)}mm")
+            else:
+                size_parts.append(f"{size_mm}mm")
+        if row.get('size_inch') is not None and row['size_inch'] != '':
+            size_inch = float(row['size_inch'])
+            if size_inch == int(size_inch):
+                size_parts.append(f"{int(size_inch)}\"")
+            else:
+                size_parts.append(f"{size_inch}\"")
+        if size_parts:
+            parts.append(" / ".join(size_parts))
+
+        # Tax and discount rates (remove .0 if whole number)
+        rates = []
+        if row.get('tax_rate') is not None and float(row['tax_rate']) > 0:
+            tax_rate = float(row['tax_rate'])
+            if tax_rate == int(tax_rate):
+                rates.append(f"Tax: {int(tax_rate)}%")
+            else:
+                rates.append(f"Tax: {tax_rate:.1f}%")
+        if row.get('discount_rate') is not None and float(row['discount_rate']) > 0:
+            disc_rate = float(row['discount_rate'])
+            if disc_rate == int(disc_rate):
+                rates.append(f"Disc: {int(disc_rate)}%")
+            else:
+                rates.append(f"Disc: {disc_rate:.1f}%")
+        if rates:
+            parts.append(" | ".join(rates))
+
+        return " | ".join(parts)
+
     def search_inventory(self, query, limit=10):
         """Fuzzy search inventory items"""
         df = self.load_inventory()
@@ -212,6 +276,139 @@ class DataManager:
         top_indices = [idx for idx, score in scores[:limit] if score > 30]
 
         return df.loc[top_indices] if top_indices else df.head(limit)
+
+    def import_from_csv(self, csv_file, mode="replace"):
+        """Import inventory from CSV file
+
+        Args:
+            csv_file: Uploaded file object or file path
+            mode: 'replace' to replace all items, 'append' to add to existing
+
+        Returns:
+            dict: {'success': bool, 'message': str, 'imported_count': int, 'errors': list}
+        """
+        try:
+            # Read CSV file
+            if hasattr(csv_file, 'read'):
+                # It's an uploaded file object
+                csv_content = csv_file.read()
+                if isinstance(csv_content, bytes):
+                    csv_content = csv_content.decode('utf-8')
+                csv_df = pd.read_csv(io.StringIO(csv_content))
+            else:
+                # It's a file path
+                csv_df = pd.read_csv(csv_file)
+
+            if csv_df.empty:
+                return {'success': False, 'message': 'CSV file is empty', 'imported_count': 0, 'errors': []}
+
+            # Required columns
+            required_cols = ['sku', 'name']
+            missing_cols = [col for col in required_cols if col not in csv_df.columns]
+            if missing_cols:
+                return {
+                    'success': False,
+                    'message': f'Missing required columns: {", ".join(missing_cols)}',
+                    'imported_count': 0,
+                    'errors': []
+                }
+
+            # Define column mapping and defaults
+            column_mapping = {
+                'sku': 'sku',
+                'name': 'name',
+                'company': 'company',
+                'size_mm': 'size_mm',
+                'size_inch': 'size_inch',
+                'base_price': 'base_price',
+                'tax_rate': 'tax_rate',
+                'discount_rate': 'discount_rate'
+            }
+
+            # Load existing inventory
+            existing_df = self.load_inventory() if mode == "append" else pd.DataFrame()
+
+            # Process CSV data
+            current_time = datetime.now().isoformat()
+            new_items = []
+            errors = []
+
+            for idx, row in csv_df.iterrows():
+                try:
+                    # Validate required fields
+                    if pd.isna(row.get('sku')) or pd.isna(row.get('name')):
+                        errors.append(f"Row {idx + 2}: SKU and Name are required")
+                        continue
+
+                    # Create new item
+                    new_item = {
+                        'item_id': str(uuid.uuid4()),
+                        'sku': str(row.get('sku', '')).strip(),
+                        'name': str(row.get('name', '')).strip(),
+                        'company': str(row.get('company', '')).strip() if not pd.isna(row.get('company')) else '',
+                        'size_mm': float(row.get('size_mm', 0)) if not pd.isna(row.get('size_mm')) else 0.0,
+                        'size_inch': float(row.get('size_inch', 0)) if not pd.isna(row.get('size_inch')) else 0.0,
+                        'base_price': float(row.get('base_price', 0)) if not pd.isna(row.get('base_price')) else 0.0,
+                        'tax_rate': float(row.get('tax_rate', self.settings["default_tax_rate"])) if not pd.isna(row.get('tax_rate')) else self.settings["default_tax_rate"],
+                        'discount_rate': float(row.get('discount_rate', self.settings["default_discount_rate"])) if not pd.isna(row.get('discount_rate')) else self.settings["default_discount_rate"],
+                        'search_blob': '',  # Will be updated in save
+                        'display_text': '',  # Will be updated in save
+                        'created_at': current_time,
+                        'updated_at': current_time
+                    }
+
+                    new_items.append(new_item)
+
+                except Exception as e:
+                    errors.append(f"Row {idx + 2}: {str(e)}")
+
+            if not new_items:
+                return {
+                    'success': False,
+                    'message': 'No valid items found in CSV',
+                    'imported_count': 0,
+                    'errors': errors
+                }
+
+            # Create DataFrame and combine with existing
+            new_df = pd.DataFrame(new_items)
+
+            if mode == "append" and not existing_df.empty:
+                # Check for duplicate SKUs
+                duplicate_skus = set(new_df['sku']) & set(existing_df['sku'])
+                if duplicate_skus:
+                    errors.append(f"Duplicate SKUs found (will be skipped): {', '.join(duplicate_skus)}")
+                    new_df = new_df[~new_df['sku'].isin(duplicate_skus)]
+
+                final_df = pd.concat([existing_df, new_df], ignore_index=True)
+            else:
+                final_df = new_df
+
+            # Save the inventory
+            success = self.save_inventory(final_df)
+
+            if success:
+                return {
+                    'success': True,
+                    'message': f'Successfully imported {len(new_items)} items',
+                    'imported_count': len(new_items),
+                    'errors': errors
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': 'Failed to save imported data',
+                    'imported_count': 0,
+                    'errors': errors
+                }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error processing CSV: {str(e)}',
+                'imported_count': 0,
+                'errors': [str(e)]
+            }
 
 # Initialize data manager
 if 'data_manager' not in st.session_state:
@@ -280,20 +477,118 @@ def inventory_tab():
                     save_inventory_item(df, item_id, sku, name, company, size_mm, size_inch,
                                       base_price, tax_rate, discount_rate)
 
+    # CSV Import section
+    with st.expander("📁 Import from CSV", expanded=False):
+        st.markdown("### CSV Import")
+        st.markdown("Upload a CSV file to bulk import inventory items. The CSV should have the following format:")
+
+        # Show sample CSV format
+        sample_data = {
+            'sku': ['ITEM001', 'ITEM002', 'ITEM003'],
+            'name': ['Sample Item 1', 'Sample Item 2', 'Sample Item 3'],
+            'company': ['Company A', 'Company B', 'Company C'],
+            'size_mm': [25.4, 50.8, 76.2],
+            'size_inch': [1.0, 2.0, 3.0],
+            'base_price': [100.50, 200.00, 300.75],
+            'tax_rate': [18.0, 18.0, 5.0],
+            'discount_rate': [5.0, 10.0, 0.0]
+        }
+        sample_df = pd.DataFrame(sample_data)
+
+        st.markdown("**Sample CSV Format:**")
+        st.dataframe(sample_df, use_container_width=True)
+
+        st.markdown("""
+        **Column Descriptions:**
+        - `sku` *(required)*: Stock Keeping Unit - unique identifier
+        - `name` *(required)*: Item name
+        - `company` *(optional)*: Company or brand name
+        - `size_mm` *(optional)*: Size in millimeters
+        - `size_inch` *(optional)*: Size in inches
+        - `base_price` *(optional)*: Base price (default: 0)
+        - `tax_rate` *(optional)*: Tax rate percentage (default: from settings)
+        - `discount_rate` *(optional)*: Discount rate percentage (default: from settings)
+
+        **Notes:**
+        - Only SKU and Name are required columns
+        - Empty cells will use default values
+        - Duplicate SKUs will be skipped in append mode
+        """)
+
+        # File upload and import options
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            uploaded_file = st.file_uploader(
+                "Choose CSV file",
+                type=['csv'],
+                help="Upload a CSV file with inventory data"
+            )
+
+        with col2:
+            import_mode = st.radio(
+                "Import Mode:",
+                ["append", "replace"],
+                help="Append: Add to existing inventory\nReplace: Replace all existing items"
+            )
+
+        if uploaded_file is not None:
+            if st.button("🚀 Import CSV", type="primary"):
+                with st.spinner("Importing items..."):
+                    result = data_manager.import_from_csv(uploaded_file, mode=import_mode)
+
+                if result['success']:
+                    st.success(f"✅ {result['message']}")
+                    if result['imported_count'] > 0:
+                        st.balloons()
+                        # Refresh the page to show new items
+                        st.rerun()
+                else:
+                    st.error(f"❌ {result['message']}")
+
+                # Show any errors or warnings
+                if result['errors']:
+                    with st.expander("⚠️ Import Warnings/Errors", expanded=True):
+                        for error in result['errors']:
+                            st.warning(error)
+
+        # Download sample CSV
+        st.markdown("---")
+        st.markdown("**Download Sample CSV Template:**")
+        csv_content = sample_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Sample CSV",
+            data=csv_content,
+            file_name="inventory_template.csv",
+            mime="text/csv",
+            help="Download a template CSV file with sample data"
+        )
+
     # Search and display inventory
     st.subheader("Inventory Items")
 
-    search_query = st.text_input("🔍 Search inventory (SKU, name, company, size, price...)",
-                                placeholder="Type to search...")
+    # Add search/filter options
+    col1, col2 = st.columns([3, 1])
 
-    if search_query:
+    with col1:
+        search_query = st.text_input("🔍 Search inventory (SKU, name, company, size, price...)",
+                                    placeholder="Type to search...")
+
+    with col2:
+        show_all = st.checkbox("Show All", value=True, help="Uncheck to filter by search")
+
+    if search_query and not show_all:
         filtered_df = data_manager.search_inventory(search_query, limit=50)
     else:
         filtered_df = df
 
     if not filtered_df.empty:
-        # Display inventory table
-        display_cols = ['sku', 'name', 'company', 'size_mm', 'size_inch', 'base_price', 'tax_rate', 'discount_rate']
+        # Display inventory table with enhanced columns
+        if 'display_text' in filtered_df.columns:
+            display_cols = ['sku', 'name', 'company', 'size_mm', 'size_inch', 'base_price', 'tax_rate', 'discount_rate', 'display_text']
+        else:
+            display_cols = ['sku', 'name', 'company', 'size_mm', 'size_inch', 'base_price', 'tax_rate', 'discount_rate']
+
         st.dataframe(filtered_df[display_cols], use_container_width=True)
 
         # Item actions
@@ -301,9 +596,17 @@ def inventory_tab():
             col1, col2 = st.columns(2)
 
             with col1:
-                selected_item = st.selectbox("Select item to edit:",
-                                           options=filtered_df['item_id'].tolist(),
-                                           format_func=lambda x: f"{filtered_df[filtered_df['item_id']==x]['sku'].iloc[0]} - {filtered_df[filtered_df['item_id']==x]['name'].iloc[0]}")
+                if 'display_text' in filtered_df.columns:
+                    # Use display_text for better item selection
+                    item_options = filtered_df[['item_id', 'display_text']].set_index('item_id')['display_text'].to_dict()
+                    selected_item = st.selectbox("Select item to edit:",
+                                               options=list(item_options.keys()),
+                                               format_func=lambda x: item_options[x])
+                else:
+                    # Fallback to old format
+                    selected_item = st.selectbox("Select item to edit:",
+                                               options=filtered_df['item_id'].tolist(),
+                                               format_func=lambda x: f"{filtered_df[filtered_df['item_id']==x]['sku'].iloc[0]} - {filtered_df[filtered_df['item_id']==x]['name'].iloc[0]}")
 
                 if st.button("Load for Editing"):
                     load_item_for_editing(filtered_df, selected_item)
@@ -329,6 +632,7 @@ def save_inventory_item(df, item_id, sku, name, company, size_mm, size_inch, bas
         'tax_rate': tax_rate,
         'discount_rate': discount_rate,
         'search_blob': '',  # Will be updated in save_inventory
+        'display_text': '',  # Will be updated in save_inventory
         'updated_at': current_time
     }
 
@@ -397,31 +701,43 @@ def billing_tab():
     # Item search and add
     st.subheader("Add Items")
 
-    search_query = st.text_input("🔍 Search and add items",
-                                placeholder="Start typing to search inventory...")
+    # Load inventory for search
+    inventory_df = data_manager.load_inventory()
 
-    if search_query:
-        results = data_manager.search_inventory(search_query, limit=10)
+    if not inventory_df.empty:
+        # Create search options with display text
+        search_options = ["Select an item..."] + inventory_df['display_text'].tolist()
 
-        if not results.empty:
-            st.write("Search Results:")
-            for idx, item in results.iterrows():
-                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+        selected_display_text = st.selectbox(
+            "🔍 Search and select items",
+            options=search_options,
+            help="Type to search through all inventory items"
+        )
 
-                with col1:
-                    st.write(f"**{item['name']}** ({item['sku']})")
-                    st.caption(f"{item['company']} | {data_manager.settings['currency_symbol']}{item['base_price']:.2f}")
+        if selected_display_text != "Select an item...":
+            # Find the selected item
+            selected_item = inventory_df[inventory_df['display_text'] == selected_display_text].iloc[0]
 
-                with col2:
-                    quantity = st.number_input(f"Qty", min_value=1, value=1, key=f"qty_{item['item_id']}")
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
-                with col3:
-                    line_discount = st.number_input(f"Disc %", min_value=0.0, max_value=100.0,
-                                                  value=float(item['discount_rate']), key=f"disc_{item['item_id']}")
+            with col1:
+                st.write(f"**Selected:** {selected_item['name']} ({selected_item['sku']})")
+                if selected_item.get('company'):
+                    st.caption(f"Company: {selected_item['company']}")
 
-                with col4:
-                    if st.button("Add", key=f"add_{item['item_id']}"):
-                        add_to_cart(item, quantity, line_discount)
+            with col2:
+                quantity = st.number_input("Quantity", min_value=1, value=1, key="selected_qty")
+
+            with col3:
+                line_discount = st.number_input("Discount %", min_value=0.0, max_value=100.0,
+                                              value=float(selected_item['discount_rate']), key="selected_disc")
+
+            with col4:
+                if st.button("Add to Invoice", key="add_selected"):
+                    add_to_cart(selected_item, quantity, line_discount)
+                    st.rerun()
+    else:
+        st.info("No inventory items found. Please add items in the Inventory tab first.")
 
     # Display cart
     if st.session_state.invoice_cart:
