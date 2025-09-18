@@ -1,6 +1,6 @@
 # Simple Billing Tool
 
-A comprehensive inventory management and billing solution built with Streamlit. Features advanced fuzzy search, dual storage systems (Parquet/JSON), decimal-precise calculations, and professional invoice generation.
+A comprehensive inventory management and billing solution built with Streamlit. Features advanced fuzzy search, dual storage systems (Parquet/JSON), decimal-precise calculations, professional invoice generation, and **Tally-style keyboard-driven interface**.
 
 ## 🚀 Features
 
@@ -23,6 +23,15 @@ A comprehensive inventory management and billing solution built with Streamlit. 
 - **Shopping Cart**: Add/remove items with live total calculations
 - **Decimal Precision**: ROUND_HALF_UP calculations for financial accuracy
 - **Invoice Storage**: Persistent invoice history with auto-incrementing numbers
+
+### ⚡ **Tally-Style Interface** *(NEW!)*
+- **Keyboard-First Design**: Tab navigation, Enter to add lines, just like Tally ERP
+- **Grid-Based Entry**: Familiar table layout with Item | Qty | Rate | Disc% | Amount
+- **Auto-complete Search**: Type to search items with arrow key navigation
+- **Real-time Calculations**: Live totals update as you type
+- **Professional Shortcuts**: Ctrl+S to save, F9 to calculate, Escape to close
+- **Speed Optimized**: Muscle memory workflow for rapid data entry
+- **Classic Look**: Monospace font and traditional accounting software aesthetics
 
 ### 💾 **Dual Storage Architecture**
 - **Primary Storage**: Parquet files for optimal performance and compression
@@ -95,7 +104,9 @@ billing-estimate-tool/
 
 1. **Configure Settings**: Visit the Settings tab to set up your business information and preferences
 2. **Add Inventory**: Use the Inventory tab to add your products and services
-3. **Create Invoices**: Use the Billing tab to search items and create professional invoices
+3. **Create Invoices**: Choose between:
+   - **Standard Billing Tab**: Traditional form-based interface
+   - **⚡ Tally Style Tab**: Keyboard-driven interface for power users
 
 ### Inventory Management
 
@@ -132,6 +143,40 @@ billing-estimate-tool/
    - Set global discount and tax rates
    - Review calculated totals
    - Save invoice or export to PDF
+
+### ⚡ Using Tally-Style Interface *(Power User Mode)*
+
+The Tally-Style interface provides a familiar, keyboard-driven experience for users coming from traditional accounting software like Tally ERP.
+
+#### **🎯 Quick Start Workflow:**
+1. Navigate to the **"⚡ Tally Style"** tab
+2. Fill customer information (expandable section)
+3. **Type item name/SKU** in the first field
+4. **Tab → Quantity** (defaults to 1)
+5. **Tab → Rate** (auto-filled from inventory)
+6. **Tab → Discount%** (defaults to item's rate)
+7. **Enter** → Add line, return to item field
+8. **Repeat** for next items
+9. **Ctrl+S** → Save invoice
+
+#### **⌨️ Keyboard Shortcuts:**
+| Shortcut | Action |
+|----------|--------|
+| **Tab** | Move to next field |
+| **Shift+Tab** | Move to previous field |
+| **Enter** | Add current line to invoice |
+| **↑ ↓** | Navigate autocomplete suggestions |
+| **Enter** (in autocomplete) | Select item |
+| **Escape** | Close autocomplete dropdown |
+| **Ctrl+S** | Save invoice |
+| **F9** | Recalculate totals |
+
+#### **💡 Pro Tips:**
+- **Speed Entry**: Type item → Tab → Tab → Enter (if defaults are correct)
+- **Auto-complete**: Start typing any part of item name, SKU, or company
+- **Muscle Memory**: Interface stays consistent - build your workflow
+- **Real-time**: All calculations update as you type
+- **Focus Flow**: After adding a line, focus returns to item field automatically
 
 ### Settings Configuration
 
@@ -217,14 +262,19 @@ billing-estimate-tool/
 - [x] Settings management
 - [x] Tabbed user interface
 - [x] Automatic backups
+- [x] **Tally-style keyboard interface** *(NEW!)*
+- [x] **JavaScript-powered navigation** *(NEW!)*
+- [x] **Real-time calculations** *(NEW!)*
+- [x] **CSV import/export** *(COMPLETED!)*
 
 ### Planned 🔄
 - [ ] PDF export with WeasyPrint
 - [ ] Advanced reporting and analytics
-- [ ] Data import/export (CSV)
 - [ ] Invoice templates
 - [ ] Multi-currency support
 - [ ] Batch operations
+- [ ] Enhanced Tally features (shortcuts customization)
+- [ ] Barcode scanning integration
 
 ## 🤝 Contributing
 

@@ -5,3 +5,4 @@ pyarrow
 rapidfuzz
 weasyprint
 uuid
+streamlit_searchbox

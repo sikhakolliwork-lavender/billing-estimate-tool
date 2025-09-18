@@ -429,13 +429,16 @@ def main():
     st.markdown("Complete inventory management and billing solution")
 
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📦 Inventory", "🧾 Billing", "⚙️ Settings"])
+    tab1, tab2, tab2_tally, tab3 = st.tabs(["📦 Inventory", "🧾 Billing", "⚡ Tally Style", "⚙️ Settings"])
 
     with tab1:
         inventory_tab()
 
     with tab2:
         billing_tab()
+
+    with tab2_tally:
+        tally_billing_tab()
 
     with tab3:
         settings_tab()
@@ -965,6 +968,581 @@ def export_invoice_pdf(customer_name, customer_address, customer_email, notes,
     """Export invoice as PDF"""
     st.info("PDF export functionality will be implemented with weasyprint")
     # TODO: Implement PDF generation with weasyprint
+
+def tally_billing_tab():
+    """Tally-style billing interface with keyboard navigation"""
+    st.header("⚡ Tally-Style Billing")
+    st.markdown("**Keyboard-driven invoice creation like Tally - Tab to navigate, Enter to add items**")
+
+    # Initialize session state for tally interface
+    if 'tally_invoice_lines' not in st.session_state:
+        st.session_state.tally_invoice_lines = []
+    if 'tally_customer_info' not in st.session_state:
+        st.session_state.tally_customer_info = {
+            'name': '', 'address': '', 'email': '', 'notes': ''
+        }
+
+    # Load inventory for autocomplete
+    inventory_df = data_manager.load_inventory()
+    inventory_items = []
+    if not inventory_df.empty:
+        for _, row in inventory_df.iterrows():
+            inventory_items.append({
+                'id': row['item_id'],
+                'sku': row['sku'],
+                'name': row['name'],
+                'company': row.get('company', ''),
+                'price': float(row['base_price']),
+                'tax_rate': float(row['tax_rate']),
+                'discount_rate': float(row['discount_rate']),
+                'display': row['display_text'] if 'display_text' in row else f"{row['sku']} - {row['name']}"
+            })
+
+    # Customer info (compact)
+    with st.expander("Customer Information", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            customer_name = st.text_input("Customer Name", value=st.session_state.tally_customer_info['name'])
+            customer_email = st.text_input("Email", value=st.session_state.tally_customer_info['email'])
+        with col2:
+            customer_address = st.text_area("Address", value=st.session_state.tally_customer_info['address'])
+            notes = st.text_area("Notes", value=st.session_state.tally_customer_info['notes'])
+
+        # Update session state
+        st.session_state.tally_customer_info = {
+            'name': customer_name, 'address': customer_address,
+            'email': customer_email, 'notes': notes
+        }
+
+    # Main billing interface with JavaScript
+    tally_interface_html = f"""
+    <style>
+        .tally-container {{
+            font-family: 'Courier New', monospace;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }}
+
+        .tally-header {{
+            background: #2c3e50;
+            color: white;
+            padding: 10px;
+            margin-bottom: 10px;
+            text-align: center;
+            border-radius: 4px;
+            font-weight: bold;
+        }}
+
+        .tally-grid {{
+            display: grid;
+            grid-template-columns: 2fr 80px 100px 80px 120px 60px;
+            gap: 8px;
+            align-items: center;
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            border: 1px solid #ddd;
+        }}
+
+        .tally-grid.header {{
+            background: #34495e;
+            color: white;
+            font-weight: bold;
+            border: none;
+        }}
+
+        .tally-input {{
+            padding: 6px;
+            border: 1px solid #bdc3c7;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 14px;
+        }}
+
+        .tally-input:focus {{
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+        }}
+
+        .tally-amount {{
+            text-align: right;
+            font-weight: bold;
+            color: #27ae60;
+        }}
+
+        .tally-total {{
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }}
+
+        .autocomplete-dropdown {{
+            position: absolute;
+            background: white;
+            border: 1px solid #bdc3c7;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            width: 100%;
+        }}
+
+        .autocomplete-item {{
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #ecf0f1;
+        }}
+
+        .autocomplete-item:hover, .autocomplete-item.selected {{
+            background: #3498db;
+            color: white;
+        }}
+
+        .shortcut-help {{
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }}
+    </style>
+
+    <div class="tally-container">
+        <div class="tally-header">
+            INVOICE ENTRY - Tab to navigate • Enter to add line • F1 for help
+        </div>
+
+        <div class="shortcut-help">
+            <strong>Keyboard Shortcuts:</strong> Tab=Next Field | Shift+Tab=Previous | Enter=Add Line | Ctrl+S=Save | F9=Calculate
+        </div>
+
+        <!-- Header Row -->
+        <div class="tally-grid header">
+            <div>Item Description</div>
+            <div>Qty</div>
+            <div>Rate</div>
+            <div>Disc%</div>
+            <div>Amount</div>
+            <div>Action</div>
+        </div>
+
+        <!-- Current Input Row -->
+        <div class="tally-grid" id="input-row">
+            <div style="position: relative;">
+                <input type="text" id="item-search" class="tally-input"
+                       placeholder="Type item name or SKU..."
+                       autocomplete="off" />
+                <div id="autocomplete-dropdown" class="autocomplete-dropdown" style="display: none;"></div>
+            </div>
+            <input type="number" id="quantity" class="tally-input" value="1" min="1" />
+            <input type="number" id="rate" class="tally-input" step="0.01" readonly />
+            <input type="number" id="discount" class="tally-input" value="0" min="0" max="100" step="0.1" />
+            <div id="line-amount" class="tally-amount">₹0.00</div>
+            <button id="add-line" style="padding: 6px; background: #27ae60; color: white; border: none; border-radius: 3px;">Add</button>
+        </div>
+
+        <!-- Invoice Lines Display -->
+        <div id="invoice-lines"></div>
+
+        <!-- Totals Section -->
+        <div class="tally-total">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div>
+                    <label>Global Discount %:</label>
+                    <input type="number" id="global-discount" value="0" min="0" max="100" step="0.1"
+                           style="margin-left: 10px; padding: 4px; width: 80px;" />
+                    <br><br>
+                    <label>Global Tax %:</label>
+                    <input type="number" id="global-tax" value="0" min="0" max="100" step="0.1"
+                           style="margin-left: 10px; padding: 4px; width: 80px;" />
+                </div>
+                <div style="text-align: right;">
+                    <div><strong>Subtotal: <span id="subtotal">₹0.00</span></strong></div>
+                    <div>Discount: <span id="total-discount">₹0.00</span></div>
+                    <div>Tax: <span id="total-tax">₹0.00</span></div>
+                    <div style="font-size: 18px; margin-top: 10px;"><strong>TOTAL: <span id="grand-total">₹0.00</span></strong></div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px; text-align: center;">
+            <button id="save-invoice" style="padding: 10px 20px; background: #2980b9; color: white; border: none; border-radius: 4px; margin-right: 10px;">Save Invoice</button>
+            <button id="clear-all" style="padding: 10px 20px; background: #e74c3c; color: white; border: none; border-radius: 4px;">Clear All</button>
+        </div>
+    </div>
+
+    <script>
+        // Inventory data for autocomplete
+        const inventoryItems = {json.dumps(inventory_items)};
+        let currentLines = [];
+        let selectedItemIndex = -1;
+        let autocompleteItems = [];
+
+        // DOM elements
+        const itemSearch = document.getElementById('item-search');
+        const quantity = document.getElementById('quantity');
+        const rate = document.getElementById('rate');
+        const discount = document.getElementById('discount');
+        const lineAmount = document.getElementById('line-amount');
+        const addLineBtn = document.getElementById('add-line');
+        const autocompleteDropdown = document.getElementById('autocomplete-dropdown');
+        const invoiceLines = document.getElementById('invoice-lines');
+        const globalDiscount = document.getElementById('global-discount');
+        const globalTax = document.getElementById('global-tax');
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {{
+            itemSearch.focus();
+            setupEventListeners();
+            calculateLineAmount();
+        }});
+
+        function setupEventListeners() {{
+            // Item search autocomplete
+            itemSearch.addEventListener('input', handleItemSearch);
+            itemSearch.addEventListener('keydown', handleItemKeyDown);
+
+            // Quantity, rate, discount change
+            quantity.addEventListener('input', calculateLineAmount);
+            rate.addEventListener('input', calculateLineAmount);
+            discount.addEventListener('input', calculateLineAmount);
+
+            // Global values change
+            globalDiscount.addEventListener('input', calculateTotals);
+            globalTax.addEventListener('input', calculateTotals);
+
+            // Add line
+            addLineBtn.addEventListener('click', addLine);
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', handleGlobalKeyDown);
+
+            // Tab navigation
+            setupTabNavigation();
+        }}
+
+        function handleItemSearch() {{
+            const query = itemSearch.value.toLowerCase();
+            if (query.length < 1) {{
+                hideAutocomplete();
+                clearItemData();
+                return;
+            }}
+
+            // Filter items
+            autocompleteItems = inventoryItems.filter(item =>
+                item.name.toLowerCase().includes(query) ||
+                item.sku.toLowerCase().includes(query) ||
+                item.company.toLowerCase().includes(query)
+            );
+
+            showAutocomplete();
+        }}
+
+        function showAutocomplete() {{
+            if (autocompleteItems.length === 0) {{
+                hideAutocomplete();
+                return;
+            }}
+
+            let html = '';
+            autocompleteItems.forEach((item, index) => {{
+                const isSelected = index === selectedItemIndex;
+                html += `<div class="autocomplete-item ${{isSelected ? 'selected' : ''}}"
+                              onclick="selectItem(${{index}})"
+                              data-index="${{index}}">
+                           ${{item.display}}
+                         </div>`;
+            }});
+
+            autocompleteDropdown.innerHTML = html;
+            autocompleteDropdown.style.display = 'block';
+        }}
+
+        function hideAutocomplete() {{
+            autocompleteDropdown.style.display = 'none';
+            selectedItemIndex = -1;
+        }}
+
+        function selectItem(index) {{
+            if (index >= 0 && index < autocompleteItems.length) {{
+                const item = autocompleteItems[index];
+                itemSearch.value = item.display;
+                rate.value = item.price.toFixed(2);
+                discount.value = item.discount_rate;
+                hideAutocomplete();
+                calculateLineAmount();
+                quantity.focus();
+            }}
+        }}
+
+        function handleItemKeyDown(e) {{
+            if (autocompleteDropdown.style.display === 'none') return;
+
+            switch(e.key) {{
+                case 'ArrowDown':
+                    e.preventDefault();
+                    selectedItemIndex = Math.min(selectedItemIndex + 1, autocompleteItems.length - 1);
+                    showAutocomplete();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    selectedItemIndex = Math.max(selectedItemIndex - 1, 0);
+                    showAutocomplete();
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (selectedItemIndex >= 0) {{
+                        selectItem(selectedItemIndex);
+                    }}
+                    break;
+                case 'Escape':
+                    hideAutocomplete();
+                    break;
+            }}
+        }}
+
+        function clearItemData() {{
+            rate.value = '';
+            discount.value = '0';
+            calculateLineAmount();
+        }}
+
+        function calculateLineAmount() {{
+            const qty = parseFloat(quantity.value) || 0;
+            const rateVal = parseFloat(rate.value) || 0;
+            const discVal = parseFloat(discount.value) || 0;
+
+            const subtotal = qty * rateVal;
+            const discAmount = subtotal * (discVal / 100);
+            const amount = subtotal - discAmount;
+
+            lineAmount.textContent = `₹${{amount.toFixed(2)}}`;
+        }}
+
+        function addLine() {{
+            const qty = parseFloat(quantity.value) || 0;
+            const rateVal = parseFloat(rate.value) || 0;
+            const discVal = parseFloat(discount.value) || 0;
+
+            if (!itemSearch.value.trim() || qty <= 0 || rateVal <= 0) {{
+                alert('Please fill all required fields');
+                return;
+            }}
+
+            const subtotal = qty * rateVal;
+            const discAmount = subtotal * (discVal / 100);
+            const amount = subtotal - discAmount;
+
+            const line = {{
+                item: itemSearch.value,
+                quantity: qty,
+                rate: rateVal,
+                discount: discVal,
+                amount: amount
+            }};
+
+            currentLines.push(line);
+            updateInvoiceLines();
+            clearInputs();
+            calculateTotals();
+            itemSearch.focus();
+        }}
+
+        function updateInvoiceLines() {{
+            let html = '';
+            currentLines.forEach((line, index) => {{
+                html += `<div class="tally-grid">
+                           <div>${{line.item}}</div>
+                           <div>${{line.quantity}}</div>
+                           <div>₹${{line.rate.toFixed(2)}}</div>
+                           <div>${{line.discount.toFixed(1)}}%</div>
+                           <div class="tally-amount">₹${{line.amount.toFixed(2)}}</div>
+                           <button onclick="removeLine(${{index}})"
+                                   style="padding: 4px; background: #e74c3c; color: white; border: none; border-radius: 2px;">×</button>
+                         </div>`;
+            }});
+            invoiceLines.innerHTML = html;
+        }}
+
+        function removeLine(index) {{
+            currentLines.splice(index, 1);
+            updateInvoiceLines();
+            calculateTotals();
+        }}
+
+        function clearInputs() {{
+            itemSearch.value = '';
+            quantity.value = '1';
+            rate.value = '';
+            discount.value = '0';
+            lineAmount.textContent = '₹0.00';
+            hideAutocomplete();
+        }}
+
+        function calculateTotals() {{
+            const subtotal = currentLines.reduce((sum, line) => sum + line.amount, 0);
+            const globalDiscVal = parseFloat(globalDiscount.value) || 0;
+            const globalTaxVal = parseFloat(globalTax.value) || 0;
+
+            const discountAmount = subtotal * (globalDiscVal / 100);
+            const afterDiscount = subtotal - discountAmount;
+            const taxAmount = afterDiscount * (globalTaxVal / 100);
+            const total = afterDiscount + taxAmount;
+
+            document.getElementById('subtotal').textContent = `₹${{subtotal.toFixed(2)}}`;
+            document.getElementById('total-discount').textContent = `₹${{discountAmount.toFixed(2)}}`;
+            document.getElementById('total-tax').textContent = `₹${{taxAmount.toFixed(2)}}`;
+            document.getElementById('grand-total').textContent = `₹${{total.toFixed(2)}}`;
+        }}
+
+        function setupTabNavigation() {{
+            const inputs = [itemSearch, quantity, rate, discount];
+
+            inputs.forEach((input, index) => {{
+                input.addEventListener('keydown', (e) => {{
+                    if (e.key === 'Tab') {{
+                        // Let default tab behavior work
+                    }} else if (e.key === 'Enter') {{
+                        e.preventDefault();
+                        if (input === itemSearch && autocompleteDropdown.style.display !== 'none') {{
+                            if (selectedItemIndex >= 0) {{
+                                selectItem(selectedItemIndex);
+                            }}
+                        }} else if (input === discount) {{
+                            addLine();
+                        }} else {{
+                            const nextIndex = (index + 1) % inputs.length;
+                            inputs[nextIndex].focus();
+                        }}
+                    }}
+                }});
+            }});
+        }}
+
+        function handleGlobalKeyDown(e) {{
+            if (e.ctrlKey && e.key === 's') {{
+                e.preventDefault();
+                saveInvoice();
+            }} else if (e.key === 'F9') {{
+                e.preventDefault();
+                calculateTotals();
+            }}
+        }}
+
+        function saveInvoice() {{
+            if (currentLines.length === 0) {{
+                alert('Add some items before saving');
+                return;
+            }}
+
+            // Create a button to trigger Streamlit rerun with data
+            const saveData = {{
+                lines: currentLines,
+                globalDiscount: parseFloat(globalDiscount.value) || 0,
+                globalTax: parseFloat(globalTax.value) || 0
+            }};
+
+            // Store in localStorage temporarily
+            localStorage.setItem('tally_invoice_data', JSON.stringify(saveData));
+
+            // Trigger save via hidden button click
+            const event = new CustomEvent('streamlit:saveTallyInvoice', {{ detail: saveData }});
+            window.dispatchEvent(event);
+
+            alert('Invoice data prepared. Click Save in Streamlit interface.');
+        }}
+
+        document.getElementById('save-invoice').addEventListener('click', saveInvoice);
+        document.getElementById('clear-all').addEventListener('click', () => {{
+            currentLines = [];
+            updateInvoiceLines();
+            clearInputs();
+            calculateTotals();
+        }});
+
+        // Click outside to hide autocomplete
+        document.addEventListener('click', (e) => {{
+            if (!itemSearch.contains(e.target) && !autocompleteDropdown.contains(e.target)) {{
+                hideAutocomplete();
+            }}
+        }});
+    </script>
+    """
+
+    # Display the interface
+    st.components.v1.html(tally_interface_html, height=600, scrolling=True)
+
+    # Add save functionality below the interface
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 1, 1])
+
+    with col1:
+        if st.button("💾 Save Invoice", type="primary", use_container_width=True):
+            customer_info = st.session_state.tally_customer_info
+            if customer_info['name'].strip():
+                st.success("🎯 Use Ctrl+S in the interface above or click 'Save Invoice' button in the interface to save")
+            else:
+                st.error("Please enter customer name in Customer Information section")
+
+    with col2:
+        if st.button("📊 Show Invoice Data", use_container_width=True):
+            if 'tally_invoice_lines' in st.session_state and st.session_state.tally_invoice_lines:
+                st.json(st.session_state.tally_invoice_lines)
+            else:
+                st.info("No invoice data yet. Add some items in the interface above.")
+
+    with col3:
+        if st.button("🗑️ Clear All Data", use_container_width=True):
+            st.session_state.tally_invoice_lines = []
+            st.success("All data cleared!")
+            st.rerun()
+
+    # Instructions for users
+    with st.expander("📝 How to Use Tally Interface", expanded=False):
+        st.markdown("""
+        ### Keyboard Navigation (Just like Tally!)
+
+        **🔤 Item Entry:**
+        1. Type item name or SKU in the first field
+        2. Use ↑↓ arrow keys to navigate autocomplete suggestions
+        3. Press Enter to select item
+
+        **⌨️ Field Navigation:**
+        - **Tab**: Move to next field (Item → Qty → Rate → Disc%)
+        - **Shift+Tab**: Move to previous field
+        - **Enter**: Add current line to invoice (when in Discount field)
+
+        **🎯 Quick Actions:**
+        - **Ctrl+S**: Save invoice
+        - **F9**: Recalculate totals
+        - **Escape**: Close autocomplete dropdown
+
+        **💡 Pro Tips:**
+        - Quantity defaults to 1 (just press Tab if correct)
+        - Rate auto-fills from inventory (press Tab if correct)
+        - Discount defaults to item's default rate
+        - Focus automatically returns to Item field after adding a line
+
+        **📋 Workflow:**
+        1. Type item → Tab → Enter quantity → Tab → Tab → Enter discount → Enter
+        2. Repeat for next item
+        3. Set global discount/tax if needed
+        4. Save invoice when done
+        """)
+
+    # Display current lines if any
+    if hasattr(st.session_state, 'tally_invoice_lines') and st.session_state.tally_invoice_lines:
+        st.subheader("Current Invoice Lines")
+        df_lines = pd.DataFrame(st.session_state.tally_invoice_lines)
+        st.dataframe(df_lines, use_container_width=True)
 
 def settings_tab():
     """Settings management tab"""
