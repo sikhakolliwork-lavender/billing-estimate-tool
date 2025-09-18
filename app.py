@@ -416,6 +416,53 @@ if 'data_manager' not in st.session_state:
 
 data_manager = st.session_state.data_manager
 
+def reset_billing_workflow():
+    """Reset the billing workflow to initial state"""
+    st.session_state.billing_workflow = {
+        'step': 'select_item',
+        'selected_item': None,
+        'quantity': 1,
+        'discount': 0.0,
+        'reset_fields': True
+    }
+
+def advance_billing_workflow(step=None, **kwargs):
+    """Advance billing workflow to next step or specific step"""
+    if step:
+        st.session_state.billing_workflow['step'] = step
+
+    # Update workflow data
+    for key, value in kwargs.items():
+        if key in st.session_state.billing_workflow:
+            st.session_state.billing_workflow[key] = value
+
+def handle_item_selection():
+    """Handle item selection and move to quantity step"""
+    workflow = st.session_state.billing_workflow
+    if workflow['selected_item']:
+        advance_billing_workflow('enter_quantity', reset_fields=True)
+        st.rerun()
+
+def handle_quantity_entry():
+    """Handle quantity entry and move to discount step"""
+    advance_billing_workflow('enter_discount', reset_fields=True)
+    st.rerun()
+
+def handle_discount_entry():
+    """Handle discount entry and add item to cart"""
+    workflow = st.session_state.billing_workflow
+    if workflow['selected_item']:
+        # Add item to cart
+        add_to_cart(
+            workflow['selected_item'],
+            workflow['quantity'],
+            workflow['discount']
+        )
+        # Reset workflow for next item
+        reset_billing_workflow()
+        st.success(f"✅ Added {workflow['selected_item']['name']} to invoice!")
+        st.rerun()
+
 def main():
     st.set_page_config(
         page_title="Simple Billing Tool",
@@ -688,6 +735,16 @@ def billing_tab():
     if 'invoice_cart' not in st.session_state:
         st.session_state.invoice_cart = []
 
+    # Initialize billing workflow state
+    if 'billing_workflow' not in st.session_state:
+        st.session_state.billing_workflow = {
+            'step': 'select_item',  # select_item, enter_quantity, enter_discount
+            'selected_item': None,
+            'quantity': 1,
+            'discount': 0.0,
+            'reset_fields': False
+        }
+
     # Customer information
     with st.expander("Customer Information", expanded=True):
         col1, col2 = st.columns(2)
@@ -698,44 +755,138 @@ def billing_tab():
             customer_address = st.text_area("Customer Address")
             notes = st.text_area("Invoice Notes")
 
-    # Item search and add
-    st.subheader("Add Items")
+    # Enhanced Item Entry Workflow
+    st.subheader("🛒 Quick Item Entry")
 
     # Load inventory for search
     inventory_df = data_manager.load_inventory()
 
     if not inventory_df.empty:
-        # Create search options with display text
-        search_options = ["Select an item..."] + inventory_df['display_text'].tolist()
+        workflow = st.session_state.billing_workflow
 
-        selected_display_text = st.selectbox(
-            "🔍 Search and select items",
-            options=search_options,
-            help="Type to search through all inventory items"
-        )
+        # Step 1: Item Selection
+        if workflow['step'] == 'select_item':
+            st.markdown("**Step 1:** Select an item")
 
-        if selected_display_text != "Select an item...":
-            # Find the selected item
-            selected_item = inventory_df[inventory_df['display_text'] == selected_display_text].iloc[0]
+            # Create search options with display text
+            search_options = ["Select an item..."] + inventory_df['display_text'].tolist()
 
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+            def on_item_change():
+                selected_text = st.session_state.item_selector
+                if selected_text != "Select an item...":
+                    selected_item = inventory_df[inventory_df['display_text'] == selected_text].iloc[0]
+                    st.session_state.billing_workflow['selected_item'] = selected_item
+                    handle_item_selection()
+
+            selected_display_text = st.selectbox(
+                "🔍 Search and select items",
+                options=search_options,
+                key="item_selector",
+                on_change=on_item_change,
+                help="Type to search through all inventory items"
+            )
+
+        # Step 2: Quantity Entry
+        elif workflow['step'] == 'enter_quantity':
+            selected_item = workflow['selected_item']
+
+            st.markdown(f"**Step 2:** Enter quantity for **{selected_item['name']}** ({selected_item['sku']})")
+
+            if selected_item.get('company'):
+                st.caption(f"Company: {selected_item['company']} | Price: ₹{selected_item['base_price']}")
+
+            # Use auto-select functionality by defaulting to common quantities
+            col1, col2 = st.columns([3, 1])
 
             with col1:
-                st.write(f"**Selected:** {selected_item['name']} ({selected_item['sku']})")
-                if selected_item.get('company'):
-                    st.caption(f"Company: {selected_item['company']}")
+                with st.form("quantity_form", clear_on_submit=False):
+                    quantity = st.number_input(
+                        "Quantity",
+                        min_value=1,
+                        value=1,  # Always default to 1 for quick entry
+                        help="Enter quantity and press Enter",
+                        key="qty_input"
+                    )
+
+                    submitted = st.form_submit_button("Continue →", use_container_width=True)
+
+                    if submitted:
+                        st.session_state.billing_workflow['quantity'] = quantity
+                        handle_quantity_entry()
 
             with col2:
-                quantity = st.number_input("Quantity", min_value=1, value=1, key="selected_qty")
+                st.markdown("**Quick Qty:**")
+                for qty in [1, 2, 5, 10]:
+                    if st.button(f"{qty}", key=f"quick_qty_{qty}", use_container_width=True):
+                        st.session_state.billing_workflow['quantity'] = qty
+                        handle_quantity_entry()
 
-            with col3:
-                line_discount = st.number_input("Discount %", min_value=0.0, max_value=100.0,
-                                              value=float(selected_item['discount_rate']), key="selected_disc")
+        # Step 3: Discount Entry
+        elif workflow['step'] == 'enter_discount':
+            selected_item = workflow['selected_item']
 
-            with col4:
-                if st.button("Add to Invoice", key="add_selected"):
-                    add_to_cart(selected_item, quantity, line_discount)
-                    st.rerun()
+            st.markdown(f"**Step 3:** Enter discount for **{selected_item['name']}** (Qty: {workflow['quantity']})")
+
+            # Calculate subtotal
+            subtotal = float(selected_item['base_price']) * workflow['quantity']
+            st.caption(f"Subtotal: ₹{subtotal:.2f}")
+
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                with st.form("discount_form", clear_on_submit=False):
+                    discount = st.number_input(
+                        "Discount %",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=float(selected_item.get('discount_rate', 0)),  # Use item's default discount
+                        help="Enter discount percentage and press Enter",
+                        key="disc_input"
+                    )
+
+                    col_btn1, col_btn2 = st.columns(2)
+
+                    with col_btn1:
+                        submitted = st.form_submit_button("✅ Add to Invoice", use_container_width=True, type="primary")
+
+                    with col_btn2:
+                        cancel = st.form_submit_button("↺ Start Over", use_container_width=True)
+
+                    if submitted:
+                        st.session_state.billing_workflow['discount'] = discount
+                        handle_discount_entry()
+
+                    if cancel:
+                        reset_billing_workflow()
+                        st.rerun()
+
+            with col2:
+                st.markdown("**Quick Disc:**")
+                for disc in [0, 5, 10, 15]:
+                    if st.button(f"{disc}%", key=f"quick_disc_{disc}", use_container_width=True):
+                        st.session_state.billing_workflow['discount'] = disc
+                        handle_discount_entry()
+
+        # Show current workflow status
+        with st.expander("Workflow Status", expanded=False):
+            step_names = {
+                'select_item': '1️⃣ Select Item',
+                'enter_quantity': '2️⃣ Enter Quantity',
+                'enter_discount': '3️⃣ Enter Discount'
+            }
+
+            current_step = workflow['step']
+            for step, name in step_names.items():
+                if step == current_step:
+                    st.markdown(f"**{name}** ← You are here")
+                else:
+                    st.markdown(f"{name}")
+
+            if workflow['selected_item']:
+                st.markdown(f"**Selected Item:** {workflow['selected_item']['name']}")
+                st.markdown(f"**Quantity:** {workflow['quantity']}")
+                st.markdown(f"**Discount:** {workflow['discount']}%")
+
     else:
         st.info("No inventory items found. Please add items in the Inventory tab first.")
 
