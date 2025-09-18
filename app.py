@@ -441,12 +441,12 @@ def handle_item_selection():
     workflow = st.session_state.billing_workflow
     if workflow['selected_item'] is not None:
         advance_billing_workflow('enter_quantity', reset_fields=True)
-        st.rerun()
+        # Don't call st.rerun() in callback - let natural flow handle it
 
 def handle_quantity_entry():
     """Handle quantity entry and move to discount step"""
     advance_billing_workflow('enter_discount', reset_fields=True)
-    st.rerun()
+    # Don't call st.rerun() in form submission - Streamlit handles it
 
 def handle_discount_entry():
     """Handle discount entry and add item to cart"""
@@ -462,7 +462,7 @@ def handle_discount_entry():
         item_name = workflow['selected_item']['name']
         reset_billing_workflow()
         st.success(f"✅ Added {item_name} to invoice!")
-        st.rerun()
+        # Don't call st.rerun() in form submission - Streamlit handles it
 
 def main():
     st.set_page_config(
@@ -859,7 +859,7 @@ def billing_tab():
 
                     if cancel:
                         reset_billing_workflow()
-                        st.rerun()
+                        # Streamlit will rerun automatically after form submission
 
             with col2:
                 st.markdown("**Quick Disc:**")
