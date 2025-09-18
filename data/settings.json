@@ -1,0 +1,16 @@
+{
+  "storage_mode": "parquet",
+  "default_tax_rate": 0.0,
+  "default_discount_rate": 0.0,
+  "invoice_number_prefix": "INV",
+  "invoice_counter": 1,
+  "currency": "USD",
+  "currency_symbol": "$",
+  "rounding_mode": "ROUND_HALF_UP",
+  "business_info": {
+    "name": "Your Business Name",
+    "address": "123 Business St\nCity, State 12345",
+    "phone": "(555) 123-4567",
+    "email": "contact@business.com"
+  }
+}

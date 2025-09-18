@@ -1,0 +1,7 @@
+streamlit
+reportlab
+pandas
+pyarrow
+rapidfuzz
+weasyprint
+uuid
