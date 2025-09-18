@@ -715,23 +715,28 @@ def billing_tab():
         # Simple instruction
         st.markdown("**Select an item, enter quantity and discount, then press Add to Invoice**")
 
-        # Single form for everything
-        with st.form("add_item_form", clear_on_submit=True):
-            # All inputs in one row
-            col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+        # Item selection outside form for better interactivity
+        selected_display_text = st.selectbox(
+            "🔍 Select Item",
+            options=search_options,
+            help="Type to search through all inventory items"
+        )
 
-            with col1:
-                selected_display_text = st.selectbox(
-                    "Item",
-                    options=search_options,
-                    help="Type to search through all inventory items"
-                )
+        # Show form only if item is selected
+        if selected_display_text != "Select an item...":
+            selected_item = inventory_df[inventory_df['display_text'] == selected_display_text].iloc[0]
 
-            # Only show quantity and discount if item is selected
-            if selected_display_text != "Select an item...":
-                selected_item = inventory_df[inventory_df['display_text'] == selected_display_text].iloc[0]
+            # Show item details
+            if selected_item.get('company'):
+                st.info(f"**{selected_item['name']}** ({selected_item['sku']}) - {selected_item['company']} - ₹{selected_item['base_price']}")
+            else:
+                st.info(f"**{selected_item['name']}** ({selected_item['sku']}) - ₹{selected_item['base_price']}")
 
-                with col2:
+            # Form for quantity, discount and add button
+            with st.form("add_item_form", clear_on_submit=True):
+                col1, col2, col3 = st.columns([1, 1, 1])
+
+                with col1:
                     quantity = st.number_input(
                         "Quantity",
                         min_value=1,
@@ -739,7 +744,7 @@ def billing_tab():
                         help="Enter quantity"
                     )
 
-                with col3:
+                with col2:
                     default_discount = float(selected_item.get('discount_rate', 0))
                     discount = st.number_input(
                         "Discount %",
@@ -749,16 +754,10 @@ def billing_tab():
                         help="Enter discount percentage"
                     )
 
-                with col4:
+                with col3:
                     submitted = st.form_submit_button("✅ Add to Invoice", use_container_width=True, type="primary")
 
-                # Show item details below the form
-                if selected_item.get('company'):
-                    st.caption(f"**{selected_item['name']}** ({selected_item['sku']}) - {selected_item['company']} - ₹{selected_item['base_price']}")
-                else:
-                    st.caption(f"**{selected_item['name']}** ({selected_item['sku']}) - ₹{selected_item['base_price']}")
-
-                # Calculate and show subtotal
+                # Calculate and show subtotal below the form
                 subtotal = float(selected_item['base_price']) * quantity
                 if discount > 0:
                     discount_amount = subtotal * (discount / 100)
@@ -773,13 +772,8 @@ def billing_tab():
                     st.success(f"✅ Added {quantity}x {selected_item['name']} to invoice!")
                     st.rerun()
 
-            else:
-                with col2:
-                    st.number_input("Quantity", min_value=1, value=1, disabled=True, help="Select an item first")
-                with col3:
-                    st.number_input("Discount %", min_value=0.0, value=0.0, disabled=True, help="Select an item first")
-                with col4:
-                    st.form_submit_button("Add to Invoice", disabled=True, use_container_width=True)
+        else:
+            st.info("👆 Please select an item first to enter quantity and discount.")
 
         # Quick action buttons for common scenarios
         if selected_display_text != "Select an item...":
