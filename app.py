@@ -439,7 +439,7 @@ def advance_billing_workflow(step=None, **kwargs):
 def handle_item_selection():
     """Handle item selection and move to quantity step"""
     workflow = st.session_state.billing_workflow
-    if workflow['selected_item']:
+    if workflow['selected_item'] is not None:
         advance_billing_workflow('enter_quantity', reset_fields=True)
         st.rerun()
 
@@ -451,7 +451,7 @@ def handle_quantity_entry():
 def handle_discount_entry():
     """Handle discount entry and add item to cart"""
     workflow = st.session_state.billing_workflow
-    if workflow['selected_item']:
+    if workflow['selected_item'] is not None:
         # Add item to cart
         add_to_cart(
             workflow['selected_item'],
@@ -459,8 +459,9 @@ def handle_discount_entry():
             workflow['discount']
         )
         # Reset workflow for next item
+        item_name = workflow['selected_item']['name']
         reset_billing_workflow()
-        st.success(f"✅ Added {workflow['selected_item']['name']} to invoice!")
+        st.success(f"✅ Added {item_name} to invoice!")
         st.rerun()
 
 def main():
@@ -882,7 +883,7 @@ def billing_tab():
                 else:
                     st.markdown(f"{name}")
 
-            if workflow['selected_item']:
+            if workflow['selected_item'] is not None:
                 st.markdown(f"**Selected Item:** {workflow['selected_item']['name']}")
                 st.markdown(f"**Quantity:** {workflow['quantity']}")
                 st.markdown(f"**Discount:** {workflow['discount']}%")
