@@ -418,12 +418,14 @@ data_manager = st.session_state.data_manager
 
 def reset_billing_workflow():
     """Reset the billing workflow to initial state"""
+    current_counter = st.session_state.billing_workflow.get('form_key_counter', 0)
     st.session_state.billing_workflow = {
         'step': 'select_item',
         'selected_item': None,
         'quantity': 1,
         'discount': 0.0,
-        'reset_fields': True
+        'reset_fields': True,
+        'form_key_counter': current_counter + 1  # Increment to reset forms
     }
 
 def advance_billing_workflow(step=None, **kwargs):
@@ -435,6 +437,11 @@ def advance_billing_workflow(step=None, **kwargs):
     for key, value in kwargs.items():
         if key in st.session_state.billing_workflow:
             st.session_state.billing_workflow[key] = value
+
+    # Increment form counter when moving between steps to reset forms
+    if step:
+        current_counter = st.session_state.billing_workflow.get('form_key_counter', 0)
+        st.session_state.billing_workflow['form_key_counter'] = current_counter + 1
 
 def handle_item_selection():
     """Handle item selection and move to quantity step"""
@@ -743,7 +750,8 @@ def billing_tab():
             'selected_item': None,
             'quantity': 1,
             'discount': 0.0,
-            'reset_fields': False
+            'reset_fields': False,
+            'form_key_counter': 0  # For resetting forms
         }
 
     # Customer information
@@ -773,7 +781,8 @@ def billing_tab():
             search_options = ["Select an item..."] + inventory_df['display_text'].tolist()
 
             def on_item_change():
-                selected_text = st.session_state.item_selector
+                selector_key = f"item_selector_{workflow['form_key_counter']}"
+                selected_text = st.session_state[selector_key]
                 if selected_text != "Select an item...":
                     selected_item = inventory_df[inventory_df['display_text'] == selected_text].iloc[0]
                     st.session_state.billing_workflow['selected_item'] = selected_item
@@ -782,9 +791,10 @@ def billing_tab():
             selected_display_text = st.selectbox(
                 "🔍 Search and select items",
                 options=search_options,
-                key="item_selector",
+                key=f"item_selector_{workflow['form_key_counter']}",
                 on_change=on_item_change,
-                help="Type to search through all inventory items"
+                help="Type to search through all inventory items",
+                index=0  # Always start with "Select an item..."
             )
 
         # Step 2: Quantity Entry
@@ -796,17 +806,22 @@ def billing_tab():
             if selected_item.get('company'):
                 st.caption(f"Company: {selected_item['company']} | Price: ₹{selected_item['base_price']}")
 
-            # Use auto-select functionality by defaulting to common quantities
+            # Use dynamic key to reset form
+            form_key = f"quantity_form_{workflow['form_key_counter']}"
+
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                with st.form("quantity_form", clear_on_submit=False):
+                # Auto-focus on quantity with value=1 and auto-select
+                st.markdown("💡 **Tip:** The quantity field is ready for input - just type the number and press Enter!")
+
+                with st.form(form_key, clear_on_submit=True):
                     quantity = st.number_input(
                         "Quantity",
                         min_value=1,
-                        value=1,  # Always default to 1 for quick entry
-                        help="Enter quantity and press Enter",
-                        key="qty_input"
+                        value=1,
+                        help="Type quantity and press Enter to continue",
+                        key=f"qty_input_{workflow['form_key_counter']}"
                     )
 
                     submitted = st.form_submit_button("Continue →", use_container_width=True)
@@ -818,7 +833,7 @@ def billing_tab():
             with col2:
                 st.markdown("**Quick Qty:**")
                 for qty in [1, 2, 5, 10]:
-                    if st.button(f"{qty}", key=f"quick_qty_{qty}", use_container_width=True):
+                    if st.button(f"{qty}", key=f"quick_qty_{qty}_{workflow['form_key_counter']}", use_container_width=True):
                         st.session_state.billing_workflow['quantity'] = qty
                         handle_quantity_entry()
 
@@ -832,17 +847,23 @@ def billing_tab():
             subtotal = float(selected_item['base_price']) * workflow['quantity']
             st.caption(f"Subtotal: ₹{subtotal:.2f}")
 
+            # Use dynamic key to reset form
+            form_key = f"discount_form_{workflow['form_key_counter']}"
+
             col1, col2 = st.columns([3, 1])
 
             with col1:
-                with st.form("discount_form", clear_on_submit=False):
+                st.markdown("💡 **Tip:** Enter discount and press Enter to add item to invoice!")
+
+                with st.form(form_key, clear_on_submit=True):
+                    default_discount = float(selected_item.get('discount_rate', 0))
                     discount = st.number_input(
                         "Discount %",
                         min_value=0.0,
                         max_value=100.0,
-                        value=float(selected_item.get('discount_rate', 0)),  # Use item's default discount
-                        help="Enter discount percentage and press Enter",
-                        key="disc_input"
+                        value=default_discount,
+                        help="Type discount percentage and press Enter to add to invoice",
+                        key=f"disc_input_{workflow['form_key_counter']}"
                     )
 
                     col_btn1, col_btn2 = st.columns(2)
@@ -859,12 +880,11 @@ def billing_tab():
 
                     if cancel:
                         reset_billing_workflow()
-                        # Streamlit will rerun automatically after form submission
 
             with col2:
                 st.markdown("**Quick Disc:**")
                 for disc in [0, 5, 10, 15]:
-                    if st.button(f"{disc}%", key=f"quick_disc_{disc}", use_container_width=True):
+                    if st.button(f"{disc}%", key=f"quick_disc_{disc}_{workflow['form_key_counter']}", use_container_width=True):
                         st.session_state.billing_workflow['discount'] = disc
                         handle_discount_entry()
 
